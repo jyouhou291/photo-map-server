@@ -1,0 +1,370 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📍 みんなの写真マップ</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js@2.3.0/exif.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .header {
+            background: white; padding: 30px; border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1); margin-bottom: 20px;
+            text-align: center; position: relative;
+        }
+        .header h1 { color: #333; font-size: 2.5em; margin-bottom: 10px; }
+        .header p { color: #666; font-size: 1.2em; }
+        .status-bar {
+            position: absolute; top: 20px; right: 20px;
+            display: flex; gap: 10px; align-items: center;
+        }
+        .connection-status, .user-count {
+            padding: 8px 16px; border-radius: 20px;
+            font-size: 14px; font-weight: bold;
+        }
+        .status-connected { background: #4CAF50; color: white; }
+        .status-disconnected { background: #f44336; color: white; }
+        .user-count { background: #2196F3; color: white; }
+        .upload-card {
+            background: white; padding: 30px; border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1); margin-bottom: 20px;
+        }
+        .upload-area {
+            border: 3px dashed #ddd; border-radius: 15px;
+            padding: 60px 20px; text-align: center; cursor: pointer;
+            transition: all 0.3s ease; background: #fafafa;
+        }
+        .upload-area:hover {
+            border-color: #4CAF50; background: #f0f8f0;
+            transform: translateY(-2px);
+        }
+        .upload-icon { font-size: 80px; margin-bottom: 20px; }
+        .upload-text { font-size: 1.3em; color: #333; margin-bottom: 10px; }
+        .upload-subtext { color: #666; font-size: 1em; }
+        .file-input { display: none; }
+        .input-group { margin: 20px 0; }
+        .input-group label {
+            display: block; margin-bottom: 8px; font-weight: bold;
+            color: #333; font-size: 1.1em;
+        }
+        .input-group input, .input-group textarea {
+            width: 100%; padding: 15px; border: 2px solid #ddd;
+            border-radius: 10px; font-size: 16px;
+        }
+        .big-button {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white; border: none; padding: 20px 40px;
+            border-radius: 15px; cursor: pointer; font-size: 1.3em;
+            font-weight: bold; width: 100%; margin: 10px 0;
+            transition: all 0.3s ease;
+        }
+        .big-button:hover { transform: translateY(-2px); }
+        .big-button:disabled { background: #ccc; cursor: not-allowed; }
+        .big-button.danger { background: linear-gradient(45deg, #f44336, #da190b); }
+        .map-container {
+            background: white; border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1); overflow: hidden;
+            position: relative; margin-bottom: 20px;
+        }
+        #map { height: 500px; width: 100%; }
+        .realtime-indicator {
+            position: absolute; top: 15px; left: 15px;
+            background: rgba(244, 67, 54, 0.9); color: white;
+            padding: 8px 15px; border-radius: 20px;
+            font-size: 14px; font-weight: bold; z-index: 1000;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .photo-list {
+            background: white; padding: 30px; border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        }
+        .photo-item {
+            display: flex; align-items: center; padding: 20px;
+            border-bottom: 1px solid #eee; border-radius: 10px;
+            margin-bottom: 10px; transition: all 0.3s ease;
+        }
+        .photo-item:hover { background: #f9f9f9; transform: translateX(5px); }
+        .photo-thumbnail {
+            width: 100px; height: 100px; object-fit: cover;
+            border-radius: 10px; margin-right: 20px;
+        }
+        .photo-info { flex: 1; }
+        .photo-info h4 { margin-bottom: 8px; color: #333; }
+        .photo-info p { color: #666; font-size: 14px; margin: 4px 0; }
+        .delete-btn {
+            background: #f44336; color: white; border: none;
+            padding: 10px 20px; border-radius: 8px; cursor: pointer;
+        }
+        .message {
+            padding: 15px; border-radius: 10px; margin: 15px 0;
+            font-weight: bold; text-align: center;
+        }
+        .message.success { background: #d4edda; color: #155724; }
+        .message.error { background: #f8d7da; color: #721c24; }
+        .empty-state {
+            text-align: center; padding: 60px 20px; color: #666;
+        }
+        .empty-state .icon { font-size: 80px; margin-bottom: 20px; opacity: 0.5; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📍 みんなの写真マップ</h1>
+            <p>写真を撮って、みんなで位置を共有しよう！</p>
+            <div class="status-bar">
+                <div class="connection-status" id="connectionStatus">接続中...</div>
+                <div class="user-count" id="userCount">👥 0人</div>
+            </div>
+        </div>
+        
+        <div class="upload-card">
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📸</div>
+                <div class="upload-text">写真をここにドロップ</div>
+                <div class="upload-subtext">または、クリックして写真を選択</div>
+                <input type="file" id="fileInput" class="file-input" accept="image/*">
+            </div>
+            
+            <div id="messageContainer"></div>
+            
+            <div class="input-group">
+                <label for="userName">👤 あなたの名前</label>
+                <input type="text" id="userName" placeholder="名前を入力してください">
+            </div>
+            
+            <div class="input-group">
+                <label for="photoTitle">📝 写真のタイトル</label>
+                <input type="text" id="photoTitle" placeholder="例：学校の桜">
+            </div>
+            
+            <div class="input-group">
+                <label for="photoDescription">💬 写真の説明</label>
+                <textarea id="photoDescription" placeholder="例：今日撮った学校の桜です。とてもきれいでした！"></textarea>
+            </div>
+            
+            <button class="big-button" id="addPhotoBtn" disabled>
+                ✨ 写真を追加する
+            </button>
+            
+            <button class="big-button danger" id="clearAllBtn">
+                🗑️ 全ての写真を削除
+            </button>
+        </div>
+        
+        <div class="map-container">
+            <div class="realtime-indicator">🔴 リアルタイム</div>
+            <div id="map"></div>
+        </div>
+        
+        <div class="photo-list">
+            <h3>📷 投稿された写真 <span id="photoCount">(0枚)</span></h3>
+            <div id="photoListContainer">
+                <div class="empty-state">
+                    <div class="icon">📸</div>
+                    <h3>まだ写真がありません</h3>
+                    <p>最初の写真を投稿してみましょう！</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let map, photos = [], selectedFile = null, socket = null;
+        let userId = 'user_' + Math.random().toString(36).substr(2, 9);
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initSocket();
+            initMap();
+            setupFileUpload();
+        });
+
+        function initSocket() {
+            socket = io();
+            
+            socket.on('connect', () => {
+                updateConnectionStatus(true);
+                showMessage('サーバーに接続しました', 'success');
+            });
+            
+            socket.on('disconnect', () => updateConnectionStatus(false));
+            socket.on('photos', (data) => { photos = data; updateDisplay(); });
+            socket.on('new-photo', (photo) => { photos.push(photo); updateDisplay(); });
+            socket.on('users', (count) => {
+                document.getElementById('userCount').textContent = `👥 ${count}人`;
+            });
+        }
+
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            status.textContent = connected ? '✅ 接続中' : '❌ 切断';
+            status.className = `connection-status ${connected ? 'status-connected' : 'status-disconnected'}`;
+        }
+
+        function initMap() {
+            map = L.map('map').setView([35.6762, 139.6503], 10);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        }
+
+        function setupFileUpload() {
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+            
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.style.background = '#e8f5e8'; });
+            uploadArea.addEventListener('dragleave', () => uploadArea.style.background = '#fafafa');
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.style.background = '#fafafa';
+                if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
+            });
+            
+            fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+            document.getElementById('addPhotoBtn').addEventListener('click', addPhoto);
+            document.getElementById('clearAllBtn').addEventListener('click', () => {
+                if (confirm('全ての写真を削除しますか？')) {
+                    photos = [];
+                    updateDisplay();
+                }
+            });
+        }
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                selectedFile = files[0];
+                document.getElementById('addPhotoBtn').disabled = false;
+                showMessage(`📸 ${selectedFile.name} が選択されました`, 'success');
+            }
+        }
+
+        async function addPhoto() {
+            if (!selectedFile) return;
+            
+            const userName = document.getElementById('userName').value || 'Anonymous';
+            const title = document.getElementById('photoTitle').value || 'Untitled';
+            const description = document.getElementById('photoDescription').value || '';
+            
+            try {
+                const formData = new FormData();
+                formData.append('photo', selectedFile);
+                
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    const photoData = {
+                        id: Date.now().toString(),
+                        userName,
+                        title,
+                        description,
+                        imageUrl: result.url,
+                        lat: 35.6762 + (Math.random() - 0.5) * 0.1,
+                        lng: 139.6503 + (Math.random() - 0.5) * 0.1,
+                        timestamp: new Date().toLocaleString('ja-JP')
+                    };
+                    
+                    photos.push(photoData);
+                    socket.emit('add-photo', photoData);
+                    updateDisplay();
+                    resetForm();
+                    showMessage('写真が追加されました！', 'success');
+                }
+            } catch (error) {
+                showMessage('エラーが発生しました', 'error');
+            }
+        }
+
+        function resetForm() {
+            selectedFile = null;
+            document.getElementById('photoTitle').value = '';
+            document.getElementById('photoDescription').value = '';
+            document.getElementById('addPhotoBtn').disabled = true;
+            document.getElementById('fileInput').value = '';
+        }
+
+        function updateDisplay() {
+            updateMap();
+            updatePhotoList();
+        }
+
+        function updateMap() {
+            map.eachLayer(layer => {
+                if (layer instanceof L.Marker) map.removeLayer(layer);
+            });
+            
+            photos.forEach(photo => {
+                if (photo.lat && photo.lng) {
+                    const marker = L.marker([photo.lat, photo.lng]).addTo(map);
+                    marker.bindPopup(`
+                        <div style="text-align: center;">
+                            <img src="${photo.imageUrl}" style="width: 200px; height: 150px; object-fit: cover; border-radius: 8px;">
+                            <h4>${photo.title}</h4>
+                            <p><strong>${photo.userName}</strong></p>
+                            <p>${photo.description}</p>
+                            <small>${photo.timestamp}</small>
+                        </div>
+                    `);
+                }
+            });
+        }
+
+        function updatePhotoList() {
+            const container = document.getElementById('photoListContainer');
+            const count = document.getElementById('photoCount');
+            
+            count.textContent = `(${photos.length}枚)`;
+            
+            if (photos.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">📸</div>
+                        <h3>まだ写真がありません</h3>
+                        <p>最初の写真を投稿してみましょう！</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = photos.map(photo => `
+                <div class="photo-item">
+                    <img src="${photo.imageUrl}" class="photo-thumbnail" alt="${photo.title}">
+                    <div class="photo-info">
+                        <h4>${photo.title}</h4>
+                        <p><strong>投稿者:</strong> ${photo.userName}</p>
+                        <p><strong>説明:</strong> ${photo.description}</p>
+                        <p><strong>投稿日時:</strong> ${photo.timestamp}</p>
+                    </div>
+                    <button class="delete-btn" onclick="deletePhoto('${photo.id}')">削除</button>
+                </div>
+            `).join('');
+        }
+
+        function deletePhoto(photoId) {
+            if (confirm('この写真を削除しますか？')) {
+                photos = photos.filter(p => p.id !== photoId);
+                updateDisplay();
+            }
+        }
+
+        function showMessage(text, type) {
+            const container = document.getElementById('messageContainer');
+            container.innerHTML = `<div class="message ${type}">${text}</div>`;
+            setTimeout(() => container.innerHTML = '', 3000);
+        }
+    </script>
+</body>
+</html>
