@@ -1,370 +1,414 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>📍 みんなの写真マップ</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/exif-js@2.3.0/exif.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
+    <title>画像ピンマップ</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .upload-section { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, textarea, button, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background: #007bff; color: white; cursor: pointer; border: none; }
+        button:hover { background: #0056b3; }
+        
+        /* 画像マップコンテナ */
+        .map-container { 
+            position: relative; 
+            display: inline-block; 
+            background: white; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
         }
-        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
-        .header {
-            background: white; padding: 30px; border-radius: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1); margin-bottom: 20px;
-            text-align: center; position: relative;
+        
+        .base-image { 
+            max-width: 100%; 
+            height: auto; 
+            display: block;
+            border: 2px solid #ddd;
+            border-radius: 4px;
         }
-        .header h1 { color: #333; font-size: 2.5em; margin-bottom: 10px; }
-        .header p { color: #666; font-size: 1.2em; }
-        .status-bar {
-            position: absolute; top: 20px; right: 20px;
-            display: flex; gap: 10px; align-items: center;
+        
+        /* ピンスタイル */
+        .pin { 
+            position: absolute; 
+            width: 30px; 
+            height: 30px; 
+            background: #ff4444; 
+            border: 3px solid white; 
+            border-radius: 50%; 
+            cursor: pointer; 
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            transition: all 0.2s ease;
         }
-        .connection-status, .user-count {
-            padding: 8px 16px; border-radius: 20px;
-            font-size: 14px; font-weight: bold;
+        
+        .pin:hover { 
+            background: #ff6666; 
+            transform: translate(-50%, -50%) scale(1.2);
         }
-        .status-connected { background: #4CAF50; color: white; }
-        .status-disconnected { background: #f44336; color: white; }
-        .user-count { background: #2196F3; color: white; }
-        .upload-card {
-            background: white; padding: 30px; border-radius: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1); margin-bottom: 20px;
+        
+        .pin::after {
+            content: '📷';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 12px;
         }
-        .upload-area {
-            border: 3px dashed #ddd; border-radius: 15px;
-            padding: 60px 20px; text-align: center; cursor: pointer;
-            transition: all 0.3s ease; background: #fafafa;
+        
+        /* 情報ウィンドウ */
+        .info-window {
+            position: absolute;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-width: 300px;
+            z-index: 1000;
+            display: none;
         }
-        .upload-area:hover {
-            border-color: #4CAF50; background: #f0f8f0;
-            transform: translateY(-2px);
+        
+        .info-window img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 4px;
+            margin-bottom: 10px;
         }
-        .upload-icon { font-size: 80px; margin-bottom: 20px; }
-        .upload-text { font-size: 1.3em; color: #333; margin-bottom: 10px; }
-        .upload-subtext { color: #666; font-size: 1em; }
-        .file-input { display: none; }
-        .input-group { margin: 20px 0; }
-        .input-group label {
-            display: block; margin-bottom: 8px; font-weight: bold;
-            color: #333; font-size: 1.1em;
+        
+        .info-window .close-btn {
+            position: absolute;
+            top: 5px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            width: auto;
+            padding: 0;
         }
-        .input-group input, .input-group textarea {
-            width: 100%; padding: 15px; border: 2px solid #ddd;
-            border-radius: 10px; font-size: 16px;
+        
+        /* 写真一覧 */
+        .photo-list { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); 
+            gap: 20px; 
         }
-        .big-button {
-            background: linear-gradient(45deg, #4CAF50, #45a049);
-            color: white; border: none; padding: 20px 40px;
-            border-radius: 15px; cursor: pointer; font-size: 1.3em;
-            font-weight: bold; width: 100%; margin: 10px 0;
-            transition: all 0.3s ease;
+        
+        .photo-item { 
+            background: white; 
+            border-radius: 8px; 
+            padding: 15px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .big-button:hover { transform: translateY(-2px); }
-        .big-button:disabled { background: #ccc; cursor: not-allowed; }
-        .big-button.danger { background: linear-gradient(45deg, #f44336, #da190b); }
-        .map-container {
-            background: white; border-radius: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1); overflow: hidden;
-            position: relative; margin-bottom: 20px;
+        
+        .photo-item img { 
+            width: 100%; 
+            height: 200px; 
+            object-fit: cover; 
+            border-radius: 4px; 
         }
-        #map { height: 500px; width: 100%; }
-        .realtime-indicator {
-            position: absolute; top: 15px; left: 15px;
-            background: rgba(244, 67, 54, 0.9); color: white;
-            padding: 8px 15px; border-radius: 20px;
-            font-size: 14px; font-weight: bold; z-index: 1000;
-            animation: pulse 2s infinite;
+        
+        .photo-info { margin-top: 10px; }
+        .coordinates { color: #666; font-size: 0.9em; }
+        
+        /* ベース画像選択 */
+        .image-selector {
+            margin-bottom: 20px;
         }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
-        .photo-list {
-            background: white; padding: 30px; border-radius: 20px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+        
+        .image-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 10px;
         }
-        .photo-item {
-            display: flex; align-items: center; padding: 20px;
-            border-bottom: 1px solid #eee; border-radius: 10px;
-            margin-bottom: 10px; transition: all 0.3s ease;
+        
+        .image-option {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            cursor: pointer;
+            text-align: center;
+            transition: border-color 0.2s;
         }
-        .photo-item:hover { background: #f9f9f9; transform: translateX(5px); }
-        .photo-thumbnail {
-            width: 100px; height: 100px; object-fit: cover;
-            border-radius: 10px; margin-right: 20px;
+        
+        .image-option:hover, .image-option.selected {
+            border-color: #007bff;
         }
-        .photo-info { flex: 1; }
-        .photo-info h4 { margin-bottom: 8px; color: #333; }
-        .photo-info p { color: #666; font-size: 14px; margin: 4px 0; }
-        .delete-btn {
-            background: #f44336; color: white; border: none;
-            padding: 10px 20px; border-radius: 8px; cursor: pointer;
+        
+        .image-option img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 4px;
         }
-        .message {
-            padding: 15px; border-radius: 10px; margin: 15px 0;
-            font-weight: bold; text-align: center;
-        }
-        .message.success { background: #d4edda; color: #155724; }
-        .message.error { background: #f8d7da; color: #721c24; }
-        .empty-state {
-            text-align: center; padding: 60px 20px; color: #666;
-        }
-        .empty-state .icon { font-size: 80px; margin-bottom: 20px; opacity: 0.5; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>📍 みんなの写真マップ</h1>
-            <p>写真を撮って、みんなで位置を共有しよう！</p>
-            <div class="status-bar">
-                <div class="connection-status" id="connectionStatus">接続中...</div>
-                <div class="user-count" id="userCount">👥 0人</div>
-            </div>
-        </div>
+        <h1>📍 画像ピンマップ</h1>
         
-        <div class="upload-card">
-            <div class="upload-area" id="uploadArea">
-                <div class="upload-icon">📸</div>
-                <div class="upload-text">写真をここにドロップ</div>
-                <div class="upload-subtext">または、クリックして写真を選択</div>
-                <input type="file" id="fileInput" class="file-input" accept="image/*">
-            </div>
-            
-            <div id="messageContainer"></div>
-            
-            <div class="input-group">
-                <label for="userName">👤 あなたの名前</label>
-                <input type="text" id="userName" placeholder="名前を入力してください">
-            </div>
-            
-            <div class="input-group">
-                <label for="photoTitle">📝 写真のタイトル</label>
-                <input type="text" id="photoTitle" placeholder="例：学校の桜">
-            </div>
-            
-            <div class="input-group">
-                <label for="photoDescription">💬 写真の説明</label>
-                <textarea id="photoDescription" placeholder="例：今日撮った学校の桜です。とてもきれいでした！"></textarea>
-            </div>
-            
-            <button class="big-button" id="addPhotoBtn" disabled>
-                ✨ 写真を追加する
-            </button>
-            
-            <button class="big-button danger" id="clearAllBtn">
-                🗑️ 全ての写真を削除
-            </button>
-        </div>
-        
-        <div class="map-container">
-            <div class="realtime-indicator">🔴 リアルタイム</div>
-            <div id="map"></div>
-        </div>
-        
-        <div class="photo-list">
-            <h3>📷 投稿された写真 <span id="photoCount">(0枚)</span></h3>
-            <div id="photoListContainer">
-                <div class="empty-state">
-                    <div class="icon">📸</div>
-                    <h3>まだ写真がありません</h3>
-                    <p>最初の写真を投稿してみましょう！</p>
+        <!-- ベース画像選択 -->
+        <div class="upload-section">
+            <div class="image-selector">
+                <h3>ベース画像を選択:</h3>
+                <div class="image-options">
+                    <div class="image-option selected" data-image="campus-map.jpg">
+                        <img src="https://via.placeholder.com/300x200/4CAF50/white?text=キャンパスマップ" alt="キャンパスマップ">
+                        <p>キャンパスマップ</p>
+                    </div>
+                    <div class="image-option" data-image="floor-plan.jpg">
+                        <img src="https://via.placeholder.com/300x200/2196F3/white?text=フロアマップ" alt="フロアマップ">
+                        <p>フロアマップ</p>
+                    </div>
+                    <div class="image-option" data-image="city-map.jpg">
+                        <img src="https://via.placeholder.com/300x200/FF9800/white?text=街の地図" alt="街の地図">
+                        <p>街の地図</p>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>または独自の画像をアップロード:</label>
+                    <input type="file" id="customBaseImage" accept="image/*">
                 </div>
             </div>
         </div>
+
+        <!-- 写真アップロードフォーム -->
+        <div class="upload-section">
+            <h2>写真をアップロード</h2>
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label>写真を選択:</label>
+                    <input type="file" id="photoFile" accept="image/*" required>
+                </div>
+                <div class="form-group">
+                    <label>説明:</label>
+                    <textarea id="description" rows="3" placeholder="この写真について..."></textarea>
+                </div>
+                <p><strong>📍 下の画像をクリックして位置を指定してください</strong></p>
+                <button type="submit" id="submitBtn" disabled>アップロード (位置を指定してください)</button>
+            </form>
+        </div>
+
+        <!-- 画像マップ -->
+        <div class="map-container">
+            <img id="baseImage" src="https://via.placeholder.com/800x600/4CAF50/white?text=キャンパスマップ%0A%0Aクリックして写真の位置を指定" alt="ベース画像" class="base-image">
+            <div id="pins"></div>
+            <div id="infoWindow" class="info-window">
+                <button class="close-btn" onclick="closeInfoWindow()">&times;</button>
+                <div id="infoContent"></div>
+            </div>
+        </div>
+
+        <!-- 写真一覧 -->
+        <div id="photoList" class="photo-list"></div>
     </div>
 
     <script>
-        let map, photos = [], selectedFile = null, socket = null;
-        let userId = 'user_' + Math.random().toString(36).substr(2, 9);
+        let selectedPosition = null;
+        let currentBaseImage = 'campus-map.jpg';
+        let photos = [];
 
-        document.addEventListener('DOMContentLoaded', function() {
-            initSocket();
-            initMap();
-            setupFileUpload();
+        // ベース画像選択
+        document.querySelectorAll('.image-option').forEach(option => {
+            option.addEventListener('click', () => {
+                document.querySelectorAll('.image-option').forEach(opt => opt.classList.remove('selected'));
+                option.classList.add('selected');
+                
+                const imageName = option.dataset.image;
+                currentBaseImage = imageName;
+                updateBaseImage();
+            });
         });
 
-        function initSocket() {
-            socket = io();
-            
-            socket.on('connect', () => {
-                updateConnectionStatus(true);
-                showMessage('サーバーに接続しました', 'success');
-            });
-            
-            socket.on('disconnect', () => updateConnectionStatus(false));
-            socket.on('photos', (data) => { photos = data; updateDisplay(); });
-            socket.on('new-photo', (photo) => { photos.push(photo); updateDisplay(); });
-            socket.on('users', (count) => {
-                document.getElementById('userCount').textContent = `👥 ${count}人`;
-            });
-        }
-
-        function updateConnectionStatus(connected) {
-            const status = document.getElementById('connectionStatus');
-            status.textContent = connected ? '✅ 接続中' : '❌ 切断';
-            status.className = `connection-status ${connected ? 'status-connected' : 'status-disconnected'}`;
-        }
-
-        function initMap() {
-            map = L.map('map').setView([35.6762, 139.6503], 10);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-        }
-
-        function setupFileUpload() {
-            const uploadArea = document.getElementById('uploadArea');
-            const fileInput = document.getElementById('fileInput');
-            
-            uploadArea.addEventListener('click', () => fileInput.click());
-            uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.style.background = '#e8f5e8'; });
-            uploadArea.addEventListener('dragleave', () => uploadArea.style.background = '#fafafa');
-            uploadArea.addEventListener('drop', (e) => {
-                e.preventDefault();
-                uploadArea.style.background = '#fafafa';
-                if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files);
-            });
-            
-            fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
-            document.getElementById('addPhotoBtn').addEventListener('click', addPhoto);
-            document.getElementById('clearAllBtn').addEventListener('click', () => {
-                if (confirm('全ての写真を削除しますか？')) {
-                    photos = [];
-                    updateDisplay();
-                }
-            });
-        }
-
-        function handleFiles(files) {
-            if (files.length > 0) {
-                selectedFile = files[0];
-                document.getElementById('addPhotoBtn').disabled = false;
-                showMessage(`📸 ${selectedFile.name} が選択されました`, 'success');
+        // カスタム画像アップロード
+        document.getElementById('customBaseImage').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    document.getElementById('baseImage').src = e.target.result;
+                    currentBaseImage = 'custom';
+                };
+                reader.readAsDataURL(file);
             }
+        });
+
+        // ベース画像更新
+        function updateBaseImage() {
+            const baseImage = document.getElementById('baseImage');
+            const imageMap = {
+                'campus-map.jpg': 'https://via.placeholder.com/800x600/4CAF50/white?text=キャンパスマップ%0A%0Aクリックして写真の位置を指定',
+                'floor-plan.jpg': 'https://via.placeholder.com/800x600/2196F3/white?text=フロアマップ%0A%0Aクリックして写真の位置を指定',
+                'city-map.jpg': 'https://via.placeholder.com/800x600/FF9800/white?text=街の地図%0A%0Aクリックして写真の位置を指定'
+            };
+            baseImage.src = imageMap[currentBaseImage] || baseImage.src;
         }
 
-        async function addPhoto() {
-            if (!selectedFile) return;
+        // 画像クリックで位置指定
+        document.getElementById('baseImage').addEventListener('click', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
             
-            const userName = document.getElementById('userName').value || 'Anonymous';
-            const title = document.getElementById('photoTitle').value || 'Untitled';
-            const description = document.getElementById('photoDescription').value || '';
+            selectedPosition = { x, y };
             
+            // 一時的なピン表示
+            showTempPin(x, y);
+            
+            // ボタン有効化
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').textContent = `アップロード (位置: ${x.toFixed(1)}%, ${y.toFixed(1)}%)`;
+        });
+
+        // 一時的なピン表示
+        function showTempPin(x, y) {
+            // 既存の一時ピンを削除
+            const existingTemp = document.querySelector('.temp-pin');
+            if (existingTemp) existingTemp.remove();
+            
+            const tempPin = document.createElement('div');
+            tempPin.className = 'pin temp-pin';
+            tempPin.style.left = x + '%';
+            tempPin.style.top = y + '%';
+            tempPin.style.background = '#00ff00';
+            tempPin.style.animation = 'pulse 1s infinite';
+            
+            document.getElementById('pins').appendChild(tempPin);
+        }
+
+        // 写真アップロード
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!selectedPosition) {
+                alert('画像上をクリックして位置を指定してください');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('photo', document.getElementById('photoFile').files[0]);
+            formData.append('x', selectedPosition.x);
+            formData.append('y', selectedPosition.y);
+            formData.append('baseImage', currentBaseImage);
+            formData.append('description', document.getElementById('description').value);
+
             try {
-                const formData = new FormData();
-                formData.append('photo', selectedFile);
-                
-                const response = await fetch('/upload', {
+                const response = await fetch('/api/upload', {
                     method: 'POST',
                     body: formData
                 });
                 
-                const result = await response.json();
-                
-                if (result.success) {
-                    const photoData = {
-                        id: Date.now().toString(),
-                        userName,
-                        title,
-                        description,
-                        imageUrl: result.url,
-                        lat: 35.6762 + (Math.random() - 0.5) * 0.1,
-                        lng: 139.6503 + (Math.random() - 0.5) * 0.1,
-                        timestamp: new Date().toLocaleString('ja-JP')
-                    };
+                if (response.ok) {
+                    const result = await response.json();
+                    alert('アップロード成功！');
                     
-                    photos.push(photoData);
-                    socket.emit('add-photo', photoData);
-                    updateDisplay();
-                    resetForm();
-                    showMessage('写真が追加されました！', 'success');
+                    // フォームリセット
+                    document.getElementById('uploadForm').reset();
+                    selectedPosition = null;
+                    document.getElementById('submitBtn').disabled = true;
+                    document.getElementById('submitBtn').textContent = 'アップロード (位置を指定してください)';
+                    
+                    // 一時ピン削除
+                    const tempPin = document.querySelector('.temp-pin');
+                    if (tempPin) tempPin.remove();
+                    
+                    // 写真リロード
+                    loadPhotos();
                 }
             } catch (error) {
-                showMessage('エラーが発生しました', 'error');
+                alert('アップロードエラー: ' + error.message);
             }
-        }
+        });
 
-        function resetForm() {
-            selectedFile = null;
-            document.getElementById('photoTitle').value = '';
-            document.getElementById('photoDescription').value = '';
-            document.getElementById('addPhotoBtn').disabled = true;
-            document.getElementById('fileInput').value = '';
-        }
-
-        function updateDisplay() {
-            updateMap();
-            updatePhotoList();
-        }
-
-        function updateMap() {
-            map.eachLayer(layer => {
-                if (layer instanceof L.Marker) map.removeLayer(layer);
-            });
+        // ピン表示
+        function displayPins(photos) {
+            const pinsContainer = document.getElementById('pins');
+            pinsContainer.innerHTML = '';
             
             photos.forEach(photo => {
-                if (photo.lat && photo.lng) {
-                    const marker = L.marker([photo.lat, photo.lng]).addTo(map);
-                    marker.bindPopup(`
-                        <div style="text-align: center;">
-                            <img src="${photo.imageUrl}" style="width: 200px; height: 150px; object-fit: cover; border-radius: 8px;">
-                            <h4>${photo.title}</h4>
-                            <p><strong>${photo.userName}</strong></p>
-                            <p>${photo.description}</p>
-                            <small>${photo.timestamp}</small>
-                        </div>
-                    `);
+                if (photo.baseImage === currentBaseImage) {
+                    const pin = document.createElement('div');
+                    pin.className = 'pin';
+                    pin.style.left = photo.x + '%';
+                    pin.style.top = photo.y + '%';
+                    pin.dataset.photoId = photo.id;
+                    
+                    pin.addEventListener('click', () => showInfoWindow(photo, pin));
+                    pinsContainer.appendChild(pin);
                 }
             });
         }
 
-        function updatePhotoList() {
-            const container = document.getElementById('photoListContainer');
-            const count = document.getElementById('photoCount');
+        // 情報ウィンドウ表示
+        function showInfoWindow(photo, pin) {
+            const infoWindow = document.getElementById('infoWindow');
+            const infoContent = document.getElementById('infoContent');
             
-            count.textContent = `(${photos.length}枚)`;
+            infoContent.innerHTML = `
+                <img src="/uploads/${photo.filename}" alt="写真">
+                <p><strong>${photo.description || '説明なし'}</strong></p>
+                <p><small>${new Date(photo.timestamp).toLocaleString('ja-JP')}</small></p>
+                <p class="coordinates">📍 位置: ${photo.x.toFixed(1)}%, ${photo.y.toFixed(1)}%</p>
+            `;
             
-            if (photos.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <div class="icon">📸</div>
-                        <h3>まだ写真がありません</h3>
-                        <p>最初の写真を投稿してみましょう！</p>
-                    </div>
-                `;
-                return;
-            }
+            const rect = pin.getBoundingClientRect();
+            const containerRect = document.querySelector('.map-container').getBoundingClientRect();
             
-            container.innerHTML = photos.map(photo => `
+            infoWindow.style.left = (rect.left - containerRect.left + 40) + 'px';
+            infoWindow.style.top = (rect.top - containerRect.top - 10) + 'px';
+            infoWindow.style.display = 'block';
+        }
+
+        // 情報ウィンドウを閉じる
+        function closeInfoWindow() {
+            document.getElementById('infoWindow').style.display = 'none';
+        }
+
+        // 写真一覧表示
+        function displayPhotos(photos) {
+            const photoList = document.getElementById('photoList');
+            photoList.innerHTML = photos.map(photo => `
                 <div class="photo-item">
-                    <img src="${photo.imageUrl}" class="photo-thumbnail" alt="${photo.title}">
+                    <img src="/uploads/${photo.filename}" alt="写真">
                     <div class="photo-info">
-                        <h4>${photo.title}</h4>
-                        <p><strong>投稿者:</strong> ${photo.userName}</p>
-                        <p><strong>説明:</strong> ${photo.description}</p>
-                        <p><strong>投稿日時:</strong> ${photo.timestamp}</p>
+                        <p><strong>${photo.description || '説明なし'}</strong></p>
+                        <p class="coordinates">📍 ${photo.baseImage} (${photo.x.toFixed(1)}%, ${photo.y.toFixed(1)}%)</p>
+                        <p><small>${new Date(photo.timestamp).toLocaleString('ja-JP')}</small></p>
                     </div>
-                    <button class="delete-btn" onclick="deletePhoto('${photo.id}')">削除</button>
                 </div>
             `).join('');
         }
 
-        function deletePhoto(photoId) {
-            if (confirm('この写真を削除しますか？')) {
-                photos = photos.filter(p => p.id !== photoId);
-                updateDisplay();
+        // 写真読み込み
+        async function loadPhotos() {
+            try {
+                const response = await fetch('/api/photos');
+                photos = await response.json();
+                displayPins(photos);
+                displayPhotos(photos);
+            } catch (error) {
+                console.error('写真読み込みエラー:', error);
             }
         }
 
-        function showMessage(text, type) {
-            const container = document.getElementById('messageContainer');
-            container.innerHTML = `<div class="message ${type}">${text}</div>`;
-            setTimeout(() => container.innerHTML = '', 3000);
-        }
+        // 初期化
+        loadPhotos();
     </script>
+    
+    <style>
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.3); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+    </style>
 </body>
 </html>
